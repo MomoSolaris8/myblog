@@ -4,11 +4,31 @@ Local save server — runs on port 4001
 Receives POST /save-post and writes the file directly into _posts/
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 import json, pathlib
 
 POSTS_DIR = pathlib.Path(__file__).parent / '_posts'
 
 class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        params = parse_qs(urlparse(self.path).query)
+        filename = params.get('file', [''])[0]
+        if self.path.startswith('/get-post') and filename:
+            filepath = POSTS_DIR / filename
+            if filepath.exists():
+                content = filepath.read_text(encoding='utf-8')
+                self.send_response(200)
+                self._cors()
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'content': content}).encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors()
@@ -32,7 +52,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cors(self):
         self.send_header('Access-Control-Allow-Origin',  '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
     def log_message(self, *_):

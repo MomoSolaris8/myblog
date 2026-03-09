@@ -282,7 +282,7 @@ permalink: /write/
       .replace(/(^-|-$)/g, '')
       .substring(0, 60) || 'untitled';
 
-    const filename    = `${date}-${slug}.md`;
+    const filename = editFile || `${date}-${slug}.md`;
     const frontmatter = `---\nlayout: post\ntitle: "${title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n`;
     const fileContent = frontmatter + content;
     const words       = content.trim().split(/\s+/).length;
@@ -326,9 +326,41 @@ permalink: /write/
     setTimeout(() => t.classList.remove('show'), 3200);
   }
 
+  // ── Edit mode: parse frontmatter ─────────────────────────
+  function parseFrontmatter(raw) {
+    const match = raw.match(/^---\n([\s\S]*?)\n---\n\n?([\s\S]*)$/);
+    if (!match) return { title: '', content: raw };
+    const titleMatch = match[1].match(/title: "(.*)"/);
+    const title = titleMatch ? titleMatch[1].replace(/\\"/g, '"') : '';
+    return { title, content: match[2] };
+  }
+
   // ── Init ──────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', () => {
-    loadDraft();
+  let editFile = null;
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const params = new URLSearchParams(location.search);
+    editFile = params.get('file');
+
+    if (editFile) {
+      // Edit mode: load existing post
+      document.getElementById('btn-publish').textContent = 'Update';
+      setStatus('Editing');
+      try {
+        const res = await fetch(`http://localhost:4001/get-post?file=${encodeURIComponent(editFile)}`);
+        const { content } = await res.json();
+        const parsed = parseFrontmatter(content);
+        document.getElementById('title').value   = parsed.title;
+        document.getElementById('content').value = parsed.content;
+        autoResize(document.getElementById('title'));
+        updateWordCount();
+      } catch {
+        showToast('Could not load post');
+      }
+    } else {
+      // New post: load draft
+      loadDraft();
+    }
     document.getElementById('title').focus();
   });
 
