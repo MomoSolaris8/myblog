@@ -132,6 +132,7 @@ permalink: /write/
     <span id="save-status" class="save-status">Draft</span>
   </div>
   <div class="write-nav-right">
+    <button class="btn-settings" onclick="openSettings()" title="GitHub Settings">⚙</button>
     <button id="btn-publish" class="btn-write" onclick="publish()">Save post</button>
   </div>
 </nav>
@@ -162,20 +163,38 @@ permalink: /write/
   <button class="btn-toggle-preview" onclick="togglePreview()">Preview</button>
 </div>
 
+<!-- Settings Modal -->
+<div id="modal" class="modal-overlay" style="display:none" onclick="onOverlayClick(event)">
+  <div class="modal-box">
+    <h2>GitHub Token</h2>
+    <p class="modal-desc">只需填一次，存在这个浏览器里。</p>
+    <div class="form-group">
+      <label>Token（需要 repo 权限）</label>
+      <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-write" style="width:100%;padding:12px;border-radius:8px;font-size:1rem" onclick="saveSettings()">Save</button>
+      <p class="help-link">
+        <a href="https://github.com/settings/tokens/new?scopes=repo&description=myblog" target="_blank" rel="noopener">Create GitHub Token →</a>
+      </p>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div id="toast" class="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
 <script>
-  const BASE_URL = '{{ "/" | relative_url }}';
-  const CONFIG_KEY = 'gh_blog_config';
-  const DRAFT_KEY  = 'gh_blog_draft';
+  const BASE_URL  = '{{ "/" | relative_url }}';
+  const GH_OWNER  = '{{ site.github_user }}';
+  const GH_REPO   = '{{ site.github_repo }}';
+  const TOKEN_KEY = 'gh_token';
+  const DRAFT_KEY = 'gh_blog_draft';
 
-  // ── Config ────────────────────────────────────────────────
-  function getConfig() {
-    try { return JSON.parse(localStorage.getItem(CONFIG_KEY)); } catch { return null; }
-  }
-  function saveConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
+  // ── Token ─────────────────────────────────────────────────
+  function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+  function saveToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 
   // ── Draft auto-save ───────────────────────────────────────
   let saveTimer;
@@ -239,10 +258,7 @@ permalink: /write/
 
   // ── Settings modal ────────────────────────────────────────
   function openSettings() {
-    const cfg = getConfig() || {};
-    document.getElementById('gh-token').value = cfg.token || '';
-    document.getElementById('gh-owner').value = cfg.owner || '';
-    document.getElementById('gh-repo').value  = cfg.repo  || '';
+    document.getElementById('gh-token').value = getToken();
     document.getElementById('modal').style.display = 'flex';
     document.getElementById('gh-token').focus();
   }
@@ -254,12 +270,10 @@ permalink: /write/
   }
   function saveSettings() {
     const token = document.getElementById('gh-token').value.trim();
-    const owner = document.getElementById('gh-owner').value.trim();
-    const repo  = document.getElementById('gh-repo').value.trim();
-    if (!token || !owner || !repo) { showToast('Please fill in all fields.'); return; }
-    saveConfig({ token, owner, repo });
+    if (!token) { showToast('请输入 Token'); return; }
+    saveToken(token);
     closeSettings();
-    showToast('Settings saved!');
+    showToast('Token 已保存！');
   }
 
   // ── Publish ───────────────────────────────────────────────
@@ -285,8 +299,7 @@ permalink: /write/
     const filename = editFile || `${date}-${slug}.md`;
     const frontmatter = `---\nlayout: post\ntitle: "${title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n`;
     const fileContent = frontmatter + content;
-    const words       = content.trim().split(/\s+/).length;
-    const isLocal     = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const words = content.trim().split(/\s+/).length;
 
     try {
       if (isLocal) {
@@ -305,10 +318,40 @@ permalink: /write/
         showToast(`已发布 · 共 ${words} 字`);
         setTimeout(() => location.href = '/', 1200);
       } else {
-        // Hosted on GitHub Pages: use GitHub API
-        // First-time setup needed
-        showToast('线上发布需要配置 GitHub Token，功能即将开放');
-        setStatus('Draft');
+        // Hosted: use GitHub API
+        const token = getToken();
+        if (!token) { openSettings(); btn.disabled = false; return; }
+
+        const encoded = btoa(unescape(encodeURIComponent(fileContent)));
+        const apiUrl  = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/_posts/${filename}`;
+        const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github.v3+json' };
+
+        let sha;
+        if (editFile) {
+          const info = await fetch(apiUrl, { headers });
+          if (info.ok) sha = (await info.json()).sha;
+        }
+
+        const body = { message: editFile ? `update: ${title}` : `publish: ${title}`, content: encoded };
+        if (sha) body.sha = sha;
+
+        const res = await fetch(apiUrl, { method: 'PUT', headers, body: JSON.stringify(body) });
+
+        if (res.ok) {
+          clearDraft();
+          document.getElementById('title').value   = '';
+          document.getElementById('content').value = '';
+          updateWordCount();
+          setStatus('Published!');
+          showToast(`已发布 · 共 ${words} 字 · GitHub Actions 构建中…`);
+          setTimeout(() => location.href = BASE_URL || '/', 2500);
+        } else if (res.status === 401) {
+          showToast('Token 无效，请检查设置');
+          openSettings();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
       }
     } catch (e) {
       setStatus('Error');
@@ -337,19 +380,31 @@ permalink: /write/
 
   // ── Init ──────────────────────────────────────────────────
   let editFile = null;
+  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
   document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(location.search);
     editFile = params.get('file');
 
     if (editFile) {
-      // Edit mode: load existing post
       document.getElementById('btn-publish').textContent = 'Update';
       setStatus('Editing');
       try {
-        const res = await fetch(`http://localhost:4001/get-post?file=${encodeURIComponent(editFile)}`);
-        const { content } = await res.json();
-        const parsed = parseFrontmatter(content);
+        let raw;
+        if (isLocal) {
+          const res = await fetch(`http://localhost:4001/get-post?file=${encodeURIComponent(editFile)}`);
+          raw = (await res.json()).content;
+        } else {
+          const token = getToken();
+          if (!token) { openSettings(); return; }
+          const res = await fetch(
+            `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/_posts/${editFile}`,
+            { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }
+          );
+          const data = await res.json();
+          raw = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+        }
+        const parsed = parseFrontmatter(raw);
         document.getElementById('title').value   = parsed.title;
         document.getElementById('content').value = parsed.content;
         autoResize(document.getElementById('title'));
