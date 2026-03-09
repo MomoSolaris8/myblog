@@ -1,0 +1,17 @@
+title: My Writing
+description: ""
+baseurl: ""
+url: ""
+permalink: /:year/:month/:day/:title/
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - .github/
+  - vendor/
