@@ -10,7 +10,7 @@ SAVE_PID=$!
 
 echo "Starting Jekyll on :4000..."
 cd "$BLOG_DIR"
-~/.rbenv/versions/3.2.0/bin/bundle exec ~/.rbenv/versions/3.2.0/bin/jekyll serve
+~/.rbenv/versions/3.2.0/bin/bundle exec ~/.rbenv/versions/3.2.0/bin/jekyll serve --force-polling
 
 # When Jekyll stops (Ctrl+C), stop the save server too
 kill $SAVE_PID 2>/dev/null
