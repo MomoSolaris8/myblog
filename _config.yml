@@ -15,3 +15,5 @@ exclude:
   - README.md
   - .github/
   - vendor/
+  - save-server.py
+  - start.sh

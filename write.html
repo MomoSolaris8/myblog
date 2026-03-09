@@ -263,11 +263,15 @@ permalink: /write/
   }
 
   // ── Publish ───────────────────────────────────────────────
-  function publish() {
+  async function publish() {
     const title   = document.getElementById('title').value.trim();
     const content = document.getElementById('content').value.trim();
-    if (!title)   { showToast('Add a title first.'); return; }
-    if (!content) { showToast('Write something first.'); return; }
+    if (!title)   { showToast('请先填写标题'); return; }
+    if (!content) { showToast('请先写点什么'); return; }
+
+    const btn = document.getElementById('btn-publish');
+    btn.disabled = true;
+    setStatus('保存中…');
 
     const date = new Date().toISOString().split('T')[0];
     const slug = title
@@ -281,19 +285,37 @@ permalink: /write/
     const filename    = `${date}-${slug}.md`;
     const frontmatter = `---\nlayout: post\ntitle: "${title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n`;
     const fileContent = frontmatter + content;
+    const words       = content.trim().split(/\s+/).length;
+    const isLocal     = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-    // Download as .md file — drag it into _posts/ and Jekyll reloads automatically
-    const blob = new Blob([fileContent], { type: 'text/markdown' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    clearDraft();
-    setStatus('Saved');
-    showToast(`Downloaded: ${filename} → drag it into _posts/`);
+    try {
+      if (isLocal) {
+        // Local: POST directly to save-server.py → writes to _posts/
+        const res = await fetch('http://localhost:4001/save-post', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ filename, content: fileContent }),
+        });
+        if (!res.ok) throw new Error('Save server error');
+        clearDraft();
+        document.getElementById('title').value   = '';
+        document.getElementById('content').value = '';
+        updateWordCount();
+        setStatus('已发布');
+        showToast(`已发布 · 共 ${words} 字`);
+        setTimeout(() => location.href = '/', 1200);
+      } else {
+        // Hosted on GitHub Pages: use GitHub API
+        // First-time setup needed
+        showToast('线上发布需要配置 GitHub Token，功能即将开放');
+        setStatus('Draft');
+      }
+    } catch (e) {
+      setStatus('Error');
+      showToast(`错误: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ── Toast ─────────────────────────────────────────────────
